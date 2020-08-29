@@ -1,0 +1,90 @@
+pipeline {
+  environment {
+    REGISTRY= "registry.cn-shenzhen.aliyuncs.com"
+    APP_IMAGE = "registry.cn-shenzhen.aliyuncs.com/willspace/spring-demo:${env.BUILD_ID}"
+  }    
+  agent {
+    kubernetes {
+      yaml """
+apiVersion: v1
+kind: Pod
+metadata:
+  labels:
+    app: jenkins-agent
+spec:
+  containers:
+  - name: maven
+    image: willdockerhub/maven:mirror
+    args:
+    - cat
+    tty: true
+  - name: docker
+    image: docker:dind
+    args:
+    - "--registry-mirror=https://uyah70su.mirror.aliyuncs.com"
+    securityContext:
+      privileged: true
+    tty: true
+  - name: kubectl
+    image:  willdockerhub/kubectl
+    command:
+    - cat
+    tty: true
+
+"""
+    }
+  }
+  stages {
+      
+    stage('SCM Checkout') {
+        steps {
+            git branch: "master", credentialsId: 'github', url: 'https://github.com.cnpmjs.org/willzhang/spring-demo.git'
+        }
+    }
+      
+    stage('source build') {
+      steps {
+        container('maven') {
+          sh 'mvn clean package'
+        }
+      }
+    }
+
+    stage('docker build') {
+      steps {
+        container('docker') {
+          sh 'docker build -t $APP_IMAGE .'
+        }
+      }
+    }
+
+    stage('docker push') {
+      steps {
+        container('docker') {
+            withCredentials([[$class: 'UsernamePasswordMultiBinding',
+            credentialsId: 'aliyun',
+            usernameVariable: 'REGISTRY_USERNAME',
+            passwordVariable: 'REGISTRY_PASSWORD']]) {
+            sh """
+                docker login -u ${REGISTRY_USERNAME} -p ${REGISTRY_PASSWORD} ${REGISTRY}
+                docker push $APP_IMAGE
+                """
+            }
+        }
+      }
+    }
+
+    stage('app deploy') {
+      steps {
+        container('kubectl') {
+            withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+            sh """
+                sed -i "s#spring-boot-demo-image#$APP_IMAGE#g" deployment.yaml
+                kubectl --kubeconfig $KUBECONFIG apply -f deployment.yaml
+                """
+            }
+        }
+      }
+    }
+  }
+}
