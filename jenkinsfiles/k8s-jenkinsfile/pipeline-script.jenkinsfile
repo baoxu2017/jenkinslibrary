@@ -80,8 +80,8 @@ spec:
             withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
             sh """
                 mkdir -p /root/.kube/ && echo $KUBECONFIG >/root/.kube/config
-                sed -i "s#spring-boot-demo-image#${REGISTRY}:${VERSION}#g" deployment.yaml
-                kubectl apply -f deployment.yaml
+                sed -i "s#spring-boot-demo-image#${REGISTRY}:${VERSION}#g" k8s/deployment.yaml
+                kubectl apply -f k8s/deployment.yaml
                 """
             }
         }
@@ -98,7 +98,7 @@ spec:
                   --set service.type=NodePort \
                   --set service.nodePort=30085 \
                   --set image.repository=${REGISTRY}:${VERSION} \
-                  helm-chart/
+                  helm/
                 """
             }
         }
