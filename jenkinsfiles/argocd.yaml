@@ -1,0 +1,47 @@
+pipeline {
+
+  environment {
+    GIT_URL='http://10.39.140.196:10080/gogs/devops-java-sample.git'
+    GIT_CREDENTIAL_ID = 'git-id'
+    GIT_BRANCH= 'master'
+    REGISTRY = '10.39.140.196:8081/apps/spring-demo'
+    REGISTRY_CREDENTIAL_ID = 'harbor-id'	
+    DOCKER_TAG= "${BUILD_NUMBER}"
+  }
+
+  agent {
+        node {
+            label 'maven'
+        }
+  }
+
+  stages {
+      
+    stage('SCM Checkout') {
+        steps {
+            git branch: "${GIT_BRANCH}", credentialsId: '${GIT_CREDENTIAL_ID}', url: '${GIT_URL}'
+        }
+    }
+      
+    stage('source build') {
+      steps {
+        container('maven') {
+          sh 'mvn clean package'
+          
+        }
+      }
+    }
+
+    stage('docker build & push') {
+        steps {
+            container('maven') {
+                sh 'docker build -t $REGISTRY:$DOCKER_TAG .'
+                withCredentials([usernamePassword(passwordVariable : 'DOCKER_PASSWORD' ,usernameVariable : 'DOCKER_USERNAME' ,credentialsId : "$REGISTRY_CREDENTIAL_ID" ,)]) {
+                    sh 'echo "$DOCKER_PASSWORD" | docker login $REGISTRY -u "$DOCKER_USERNAME" --password-stdin'
+                    sh 'docker push $REGISTRY:$DOCKER_TAG'
+                }
+            }
+        }
+    }
+  }
+}
