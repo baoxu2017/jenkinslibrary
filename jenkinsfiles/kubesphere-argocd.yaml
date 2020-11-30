@@ -1,0 +1,71 @@
+pipeline {
+
+    environment {
+        GIT_URL='http://10.39.140.196:10080/gogs/spring-demo.git'
+        GIT_CREDENTIAL_ID = 'git-id'
+        GIT_BRANCH = 'master'
+        REGISTRY = '10.39.140.196:8081/apps/javademo'
+        REGISTRY_CREDENTIAL_ID = 'harbor-id'
+    }
+
+    agent {
+        node {
+            label 'maven'
+        }
+    }
+
+    stages {
+        
+        stage('SCM Checkout') {
+            steps {
+                git branch: "${GIT_BRANCH}", credentialsId: "${GIT_CREDENTIAL_ID}", url: "${GIT_URL}"
+            }
+        }
+        
+        stage('source build') {
+            steps {
+                container('maven') {
+                    sh 'mvn clean package'
+                
+                }
+            }
+        }
+
+        stage('docker build & push') {
+            steps {
+                script {
+                    env.COMMIT_ID = sh(returnStdout: true, script: "git log -n 1 --pretty=format:'%h'").trim()
+                    env.TIMESTRAP = sh(returnStdout: true, script: 'date +%Y%m%d%H%M%S').trim()
+                    env.DOCKER_TAG = "dev_${TIMESTRAP}_${COMMIT_ID}_${BUILD_NUMBER}"
+                }
+                container('maven') {
+                    withCredentials([usernamePassword(passwordVariable : 'DOCKER_PASSWORD' ,usernameVariable : 'DOCKER_USERNAME' ,credentialsId : "$REGISTRY_CREDENTIAL_ID" ,)]) {
+                        sh 'docker build -t $REGISTRY:$DOCKER_TAG .'
+                        sh 'echo "$DOCKER_PASSWORD" | docker login $REGISTRY -u "$DOCKER_USERNAME" --password-stdin'
+                        sh 'docker push $REGISTRY:$DOCKER_TAG'
+                    }
+                }
+            }
+        }
+
+        stage('update docker tag') {
+            environment {
+                BUILD_USER = 'admin'
+                BUILD_USER_EMAIL = 'admin@argocd.com'
+                YAML_REPO_URL='http://${username}:${password}@10.39.140.196:10080/gogs/argocd-gitops.git'
+            }
+
+            steps {
+                withCredentials([usernamePassword(passwordVariable : 'password' ,usernameVariable : 'username' ,credentialsId : "$GIT_CREDENTIAL_ID" ,)]) {
+                    sh """
+                        git config --global user.name "$BUILD_USER"
+                        git config --global user.email "$BUILD_USER_EMAIL"
+                        git clone ${YAML_REPO_URL} && cd argocd-gitops
+                        sed -i "s#$REGISTRY.*#${REGISTRY}:${DOCKER_TAG}#g" javademo/javademo-deployment.yaml
+                        git add -A && git commit -m "update tag: ${DOCKER_TAG}" && git push ${YAML_REPO_URL}
+                    """
+                }
+            }
+        }
+    }
+}
